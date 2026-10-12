@@ -185,7 +185,7 @@ export function createApp({ db, chain, services, cfg }) {
         req.method === "POST" &&
         (match = path.match(/^\/v1\/applications\/([^/]+)\/analyze$/))
       ) {
-        rate("ai:" + user.id, 1);
+        rate("ai:" + user.id, 5);
         result = await services.analyzeApplication(user, match[1]);
       } else if (
         req.method === "POST" &&
