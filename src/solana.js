@@ -125,12 +125,14 @@ export class Solana {
   }
   async ready() {
     const genesis = await this.rpc("getGenesisHash");
+
     if (
       genesis === "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" ||
       (this.cfg.network === "devnet" &&
-        genesis !== "EtWTRABZaYq6iMfeYKouRu166VU2xqa1")
-    )
+        genesis !== "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG")
+    ) {
       fail(503, "wrong_network", "RPC não corresponde à rede de teste.");
+    }
     const info = await this.rpc("getAccountInfo", [
       this.cfg.programId,
       { encoding: "base64", commitment: "finalized" },
