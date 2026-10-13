@@ -82,7 +82,28 @@ export function verifyWallet(wallet, message, signature) {
   }
 }
 export const nonce = () => randomBytes(32).toString("hex");
+// Keep diagnostics limited to host, operation, status and machine-readable code.
+// Never log headers, query strings, request bodies or upstream error messages.
+function upstreamContext(url, options) {
+  const parsed = new URL(String(url));
+  let operation = "http";
+  const rest = parsed.pathname.match(/^\/rest\/v1\/(?:rpc\/)?([a-zA-Z0-9_]+)\/?$/);
+  if (rest) operation = (options.method || "GET") + " " + rest[1];
+  else if (parsed.pathname === "/auth/v1/user") operation = "auth-user";
+  else {
+    try {
+      const method = JSON.parse(options.body || "{}").method;
+      if (typeof method === "string" && /^[a-zA-Z0-9_]{1,64}$/.test(method))
+        operation = method;
+    } catch {}
+  }
+  return { host: parsed.hostname, operation };
+}
 export async function fetchJSON(url, options = {}) {
+  const context = upstreamContext(url, options);
+  const diagnostic = (status, code) => console.error(JSON.stringify({
+    event: "upstream_failure", ...context, status, upstreamCode: code,
+  }));
   let response;
   try {
     response = await fetch(url, {
@@ -90,18 +111,36 @@ export async function fetchJSON(url, options = {}) {
       signal: AbortSignal.timeout(options.timeout ?? 20000),
     });
   } catch {
+    diagnostic(null, "connection_or_timeout");
     fail(503, "upstream_unavailable", "Serviço externo indisponível.");
   }
-  const text = await response.text();
-  if (!response.ok)
+  let text;
+  try {
+    text = await response.text();
+  } catch {
+    diagnostic(response.status, "response_read_failed");
+    fail(503, "upstream_unavailable", "Não foi possível ler a resposta externa.");
+  }
+  if (!response.ok) {
+    let code = "http_error";
+    try {
+      const result = JSONbig.parse(text);
+      const candidate = result?.code ?? result?.error?.status ?? result?.error?.code;
+      if (typeof candidate === "number" ||
+          (typeof candidate === "string" && /^[A-Z0-9_]{1,64}$/.test(candidate)))
+        code = String(candidate);
+    } catch {}
+    diagnostic(response.status, code);
     throw new ApiError(
       response.status === 401 ? 401 : 502,
       "upstream_error",
-      "A operação no serviço externo falhou.",
+      "A operação no serviço externo falhou (HTTP " + response.status + ").",
     );
+  }
   try {
     return text ? JSONbig.parse(text) : null;
   } catch {
+    diagnostic(response.status, "invalid_json");
     fail(502, "invalid_upstream", "Resposta externa inválida.");
   }
 }
